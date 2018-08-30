@@ -20,31 +20,33 @@ def sig_hdlr(sig, frame):
 signal.signal(signal.SIGINT, sig_hdlr)
 
 # ---------------------------
-def foo(port=None):
+def foo(port):
 
     context = zmq.Context()
     socket = context.socket(zmq.PAIR)
     socket.bind("tcp://*:{}".format(port))
 
+    print("port=",port)
+    pprint(socket.bind)
+
     while(1):
        print("Worker {} waiting on a recv".format(port))
        message = socket.recv()
-       print(message)
-       print("Worker {} got message".format(port,msg))
+       print("Worker {} got message {}".format(port,message))
 
 import comm
 
 ##port_lst = ("5000","5001","5002","5003","5004","5005","5006","5007")
 port_lst = ("5000","5001")
-comm_obj = comm.Comm(port_lst)
+comm_obj = comm.Comm()
 
-proc_lst = [ {'target':comm_obj.incoming,'args':(), 'kwargs':{} },
+proc_lst = [ {'target':comm_obj.incoming,'args':(), 'kwargs':{'port_lst':port_lst} },
              {'target':foo,'args':(),'kwargs':{'port':port_lst[0] } },
              {'target':foo,'args':(),'kwargs':{'port':port_lst[1] } } ]
 
 pid_proc = {}
 
-for proc in proc_lst:
+for proc in reversed(proc_lst):
     proc_obj =  Process(target=proc['target'],args=proc['args'], kwargs=proc['kwargs'])
     proc_obj.start()
 

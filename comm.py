@@ -16,7 +16,7 @@ import struct
 
 class Comm:
 
-   def __init__(self,port_lst):
+   def __init__(self):
 
       self.serial_fspec = ['/dev/ttyUSB2','/dev/ttyO4']
       self.serial = [None]*len(self.serial_fspec)
@@ -25,7 +25,7 @@ class Comm:
       for inx in range(0,1):
          try:
             ### timeout parameter will have to be tuned...
-            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.05 )
+            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.2 )
          except Exception as err:
             print("Open error ",inx,self.serial_fspec[inx],err.args)
             sys.exit(0)
@@ -35,7 +35,10 @@ class Comm:
 
       print("Opened {}".format(self.serial_fspec[inx]))
 
-      # mqz ports
+   # ---------------------------
+   def init_ports(self,port_lst):
+
+      # initialize mqz ports
       self.port_lst = port_lst
       self.socket_lst = [None]*len(port_lst)
       context = zmq.Context()
@@ -43,10 +46,13 @@ class Comm:
       for inx,port in enumerate(port_lst):
          self.socket_lst[inx] = context.socket(zmq.PAIR)
          self.socket_lst[inx].connect("tcp://localhost:{}".format(port_lst[inx]))
-         print("created zmq at port {}".format(port_lst[inx]))
+         print("Created zmq at port {} inx={}".format(port_lst[inx],inx) )
 
-  # ---------------------------
-   def incoming(self):
+
+   # ---------------------------
+   def incoming(self,port_lst):
+
+      self.init_ports(port_lst)
 
       poller = select.poll()
       for inx in range(0,1):
@@ -67,11 +73,24 @@ class Comm:
             for inx,msg in enumerate(msg_buffers):
 
                if msg:
-                  print("msg{}-> {}".format(inx,msg.decode()))
-
-                  pprint.pprint(self.socket_lst[inx])
-
+                  print("msg{}-> {} inx={}".format(inx,msg.decode(),inx))
                   self.socket_lst[inx].send( msg )
+
+   # ---------------------------
+   def outgoing(self,port_lst):
+
+      self.init_ports(port_lst)
+
+      poller = zmq.Poller()
+      for inx,sock from self.socket_lst:
+         poller.register(sock, zmq.POLLIN)
+
+
+      # Begin loop...
+      while True:
+
+         rdy = dict(poller.poll())
+
 
    # ---------------------------
    def _read_serial(self,ser_obj):

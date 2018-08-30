@@ -16,11 +16,20 @@ print("fd ",serial1)
 
 while(1):
 
-
    msg = ['t','e','s','t',' ','t','h','i','s']
    for m in msg:
       b_out = struct.pack('Bc',0xFc,m.encode())
       num = serial1.write(b_out)
       #print("wrote to {} num bytes {}".format(serial1_fspec,num))
+
+      #time.sleep(1)
+   for m in msg:
+      b_out = struct.pack('Bc',0xFd,m.encode())
+      num = serial1.write(b_out)
+      #print("wrote to {} num bytes {}".format(serial1_fspec,num))
+
+
+
+
    print("Done")
    time.sleep(7)
