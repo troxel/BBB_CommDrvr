@@ -1,70 +1,72 @@
-import os
-import time
+#!/usr/bin/python3
+
+import zmq
 import sys
-import select
+import time
+import os
 
-class Comm(object):
+# Central specification of the zmq ports
+import msg_que
 
-    def __init__(self):
+from multiprocessing import Process, active_children
 
-        import os
-        self.channels = range(0,8)
-        self.port_in = []
-        self.port_out = []
+from pprint import pprint
 
-        for fifo in self.channels:
-
-            # input
-            print("Test->{}".format(fifo) )
-
-
-            fifo_name = "./fifos/demux_in_{}".format(fifo)
-            print("Making {}".format(fifo_name))
-            if not os.path.exists(fifo_name):
-                os.mkfifo(fifo_name)
-
-            self.port_in.append(os.open(fifo_name, os.O_RDONLY | os.O_NONBLOCK))
-            # output
-            fifo_name = "./fifos/mux_out_{}".format(fifo)
-
-            if not os.path.exists(fifo_name):
-                os.mkfifo(fifo_name)
-
-            print(">>{}".format(fifo_name))
-
-            fd = os.open(fifo_name, os.O_WRONLY | os.O_NONBLOCK)
-
-
-            self.port_out.append(fd)
-
-
-
-
-
-
-
-
-
-'''
-def child( ):
-    pipeout = os.open(pipe_name, os.O_WRONLY)
-    counter = 0
-    while True:
+import signal
+def sig_hdlr(sig, frame):
+        print('You pressed Ctrl+C!')
         time.sleep(1)
-        os.write(pipeout, 'Number %03d\n' % counter)
-        counter = (counter+1) % 5
+        sys.exit(0)
 
-def parent( ):
-    pipein = open(pipe_name, 'r')
-    while True:
-        line = pipein.readline()[:-1]
-        print 'Parent %d got "%s" at %s' % (os.getpid(), line, time.time( ))
+signal.signal(signal.SIGINT, sig_hdlr)
 
-if not os.path.exists(pipe_name):
-    os.mkfifo(pipe_name)
-pid = os.fork()
-if pid != 0:
-    parent()
-else:
-    child()
-'''
+import worker1
+
+import comm
+comm_obj = comm.Comm()
+
+proc_lst = [ {'target':comm_obj.incoming,'args':(), 'kwargs':{} },
+             {'target':comm_obj.outgoing,'args':(), 'kwargs':{} },
+             {'target':worker1.translate,'args':(),'kwargs':{'port_in':msg_que.demux_lst[0],'port_out':msg_que.mux_lst[0] } },
+             {'target':worker1.translate,'args':(),'kwargs':{'port_in':msg_que.demux_lst[1],'port_out':msg_que.mux_lst[1] } } ]
+
+pid_proc = {}
+
+# Start processes
+for proc in reversed(proc_lst):
+    proc_obj =  Process(target=proc['target'],args=proc['args'], kwargs=proc['kwargs'])
+    proc_obj.start()
+
+    pid_proc[proc_obj.pid] = proc_obj
+
+
+pprint(pid_proc)
+
+poller = zmq.Poller()
+
+context_state = zmq.Context()
+socket_state = context_state.socket(zmq.PAIR)
+socket_state.bind("tcp://*:{}".format(msg_que.state))
+poller.register(socket_state, zmq.POLLIN)
+
+context_logger = zmq.Context()
+socket_logger = context_state.socket(zmq.PAIR)
+socket_logger.bind("tcp://*:{}".format(msg_que.logger))
+poller.register(socket_logger, zmq.POLLIN)
+
+# --- Start Polling Loop ----
+while True:
+   rdy = dict(poller.poll())
+   for sock,event in rdy.items():
+      pprint(sock)
+      msg = sock.recv()
+      print("\nchanging state",msg)
+
+
+
+
+"""
+if os.wait():
+    print("Done")
+    sys.exit()
+"""

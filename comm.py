@@ -1,95 +1,119 @@
 #!/usr/bin/python
 
 import zmq
-import random
 import sys
 import time
 import os
-from random import randint
 import os.path
-import stat
-import pprint
+from pprint import pprint
 import serial
 import select
-
 import struct
+
+import msg_que
 
 class Comm:
 
    def __init__(self):
 
-      self.serial_fspec = ['/dev/ttyUSB2','/dev/ttyO4']
+      # Serial file handles are preserved across fork
+      self.serial_fspec = ['/dev/ttyO1','/dev/ttyO4']
+      self.serial_fspec = ['/dev/ttyUSB2']
       self.serial = [None]*len(self.serial_fspec)
-      self.fds2ser = {}
+      self.fds2ser = {}   # file descriptor to serial device
+      self.fds2dtm = {}   # file descriptor to serial port number datum 
 
-      for inx in range(0,1):
+      for inx,fspec in enumerate(self.serial_fspec):
          try:
-            ### timeout parameter will have to be tuned...
-            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.2 )
+            ### timeout parameter will have to be tuned to hardware...
+            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.22 )
          except Exception as err:
             print("Open error ",inx,self.serial_fspec[inx],err.args)
             sys.exit(0)
 
          # links file desc with serial object
-         self.fds2ser[self.serial[inx].fileno()] = self.serial[inx]
+         fileno = self.serial[inx].fileno()
+         self.fds2ser[fileno] = self.serial[inx]
+         self.fds2dtm[fileno] = inx * 4
 
       print("Opened {}".format(self.serial_fspec[inx]))
 
    # ---------------------------
-   def init_ports(self,port_lst):
+   # Receives incoming muxed data from serial ports
+   # and demuxes and distributes to the appropiate msg queue
+   # ---------------------------
+   def incoming(self):
 
-      # initialize mqz ports
-      self.port_lst = port_lst
-      self.socket_lst = [None]*len(port_lst)
+      client_ports = msg_que.demux_lst
+
+      # initialize client side zmq sockets
+      self.client_socks = [None]*len(client_ports)
       context = zmq.Context()
 
-      for inx,port in enumerate(port_lst):
-         self.socket_lst[inx] = context.socket(zmq.PAIR)
-         self.socket_lst[inx].connect("tcp://localhost:{}".format(port_lst[inx]))
-         print("Created zmq at port {} inx={}".format(port_lst[inx],inx) )
+      for inx,port in enumerate(client_ports):
+         self.client_socks[inx] = context.socket(zmq.PAIR)
+         self.client_socks[inx].connect("tcp://localhost:{}".format(client_ports[inx]))
+         print("Created zmq at port {} inx={}".format(client_ports[inx],inx) )
 
-
-   # ---------------------------
-   def incoming(self,port_lst):
-
-      self.init_ports(port_lst)
-
+      # Register serial port with poller
       poller = select.poll()
       for inx in range(0,1):
          poller.register(self.serial[inx], select.POLLIN)
 
-      # Begin loop...
+      # --- Start Polling Loop ----
       while True:
 
-         print("polling")
-         rdy_lst = poller.poll()
 
+         rdy_lst = poller.poll()
+         # returns a list of truples - (fd,event).
          for rdy in rdy_lst:
-            fd = rdy[0]
+
+            # File descriptor
+            fd = rdy[0]  
             ser_obj = self.fds2ser[fd]
+            datum = self.fds2dtm[fd]
 
             msg_buffers = self._read_serial(ser_obj)
 
             for inx,msg in enumerate(msg_buffers):
-
                if msg:
-                  print("msg{}-> {} inx={}".format(inx,msg.decode(),inx))
-                  self.socket_lst[inx].send( msg )
+                  self.client_socks[inx+datum].send( msg )
 
    # ---------------------------
-   def outgoing(self,port_lst):
+   # Receives outgoing date from msg queue and muxes the data
+   # and sends out the serial port.
+   # ---------------------------
+   def outgoing(self):
 
-      self.init_ports(port_lst)
+      server_ports = msg_que.mux_lst
+
+      # initialize server zmq sockets
+      self.server_ports = server_ports
+      self.server_socks = [None]*len(server_ports)
+      context = zmq.Context()
+
+      for inx,port in enumerate(server_ports):
+         self.server_socks[inx] = context.socket(zmq.PAIR)
+         print("Binding zmq at port {} inx={}".format(server_ports[inx],inx) )
+         self.server_socks[inx].bind("tcp://*:{}".format(server_ports[inx]))
 
       poller = zmq.Poller()
-      for inx,sock from self.socket_lst:
+      for inx,sock in enumerate(self.server_socks):
          poller.register(sock, zmq.POLLIN)
 
-
-      # Begin loop...
+      # --- Start Polling Loop ----
       while True:
-
          rdy = dict(poller.poll())
+         for sock,event in rdy.items():
+            msg = sock.recv()
+            #time.sleep(2)
+            #smsg = ['Y','Y']
+            #for m in smsg:
+            #   b_out = struct.pack('Bc',0xFc,m.encode())
+            #   self.serial[0].write(b_out)
+            print("\nGot !!!!",msg)
+
+         ##pprint(rdy)
 
 
    # ---------------------------
@@ -104,7 +128,7 @@ class Comm:
             return(msg_buffers)
 
          if len(bytes_in) != 2:
-            print("Opps increase timeout {}".format(len(bytes_in)) )
+            print("Opps increase timeout only read {} byte".format(len(bytes_in)) )
             time.sleep(1)
             ser_obj.read(1)
             continue
@@ -123,52 +147,3 @@ class Comm:
             byte = ser_obj.read(1)
 
          ##print("len ->",len(bytes_in),bytes_in)
-
-
-"""
-context = zmq.Context()
-
-for inx in range(2):
-    socket_lst[inx] = context.socket(zmq.PAIR)
-    socket_lst[inx].bind("tcp://*:{}".format(port_lst[inx]))
-
-    print('init {}'.format(inx))
-
-inx = 0
-while True:
-    rnd = randint(0, 1)
-    print("Sending message to {}".format(rnd))
-    send_msg = 'Hello worker {}'.format(rnd)
-    socket_lst[rnd].send( str.encode(send_msg) )
-    print("sent!")
-    time.sleep(3)
-
-while(1):
-    print("polln")
-    socks = dict(poller.poll())
-
-    for key, value in socks.items():
-        print("key {} : value {}".format(key,value))
-
-
- # ---------------------------
-   def ser_mon(self,ser_port):
-
-      ser_obj = self.serial[0]
-
-      while(1):
-
-         message = self._read_serial(ser_obj)
-         inx=0
-         for msg in message:
-            print("message-> ",msg.decode("utf-8"),inx)
-            inx =+ 1
-            ##print("msg --> {}".format(message))
-
-            ##rnd = randint(0, len(port_lst)-1 )
-            ##print("Sending message to worker {}".format(port_lst[rnd]))
-            ##send_msg = 'Hello worker {}'.format(port_lst[rnd])
-            ##socket_lst[rnd].send( str.encode(send_msg) )
-            ##time.sleep(3)
-
-"""
