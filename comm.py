@@ -26,7 +26,7 @@ class Comm:
       for inx,fspec in enumerate(self.serial_fspec):
          try:
             ### timeout parameter will have to be tuned to hardware...
-            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.22 )
+            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.23 )
          except Exception as err:
             print("Open error ",inx,self.serial_fspec[inx],err.args)
             sys.exit(0)

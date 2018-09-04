@@ -9,7 +9,7 @@ import os
 import msg_que
 
 # ---------------------------
-def translate(port_in,port_out):
+def translate(port_in,port_out,state):
 
    context_state = zmq.Context()
    socket_state = context_state.socket(zmq.PAIR)
@@ -29,4 +29,6 @@ def translate(port_in,port_out):
        print("Worker {} got message {}".format(port_in,message))
        socket_out.send(message)
 
-       socket_state.send(b'{pan:23.3}')
+       state['time'] = time.time() 
+
+       ##socket_state.send(b'{pan:23.3}')
