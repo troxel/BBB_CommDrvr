@@ -5,9 +5,6 @@ import sys
 import time
 import os
 
-# Central specification of the zmq ports
-import msg_que
-
 from multiprocessing import Process, Manager, active_children
 
 from pprint import pprint
@@ -20,13 +17,21 @@ def sig_hdlr(sig, frame):
 
 signal.signal(signal.SIGINT, sig_hdlr)
 
+# Central specification of the zmq ports
+import msg_que
+
+import zlog
+
 if __name__ == "__main__":
+
+   import logging
 
    manager = Manager()
    import json
 
    state = manager.dict()
    state['time'] = time.time()
+   state['log_lvl'] = zlog.DEBUG
 
    import worker1
 
@@ -36,8 +41,8 @@ if __name__ == "__main__":
    dm = msg_que.demux_lst
    mx = msg_que.mux_lst
 
-   proc_lst = [ {'target':comm_obj.incoming,'args':(), 'kwargs':{} },
-                {'target':comm_obj.outgoing,'args':(), 'kwargs':{} },
+   proc_lst = [ {'target':comm_obj.incoming,'args':(), 'kwargs':{'state':state } },
+                {'target':comm_obj.outgoing,'args':(), 'kwargs':{'state':state } },
                 {'target':worker1.translate,'args':(),'kwargs':{'port_in':dm[0],'port_out':mx[0],'state':state } },
                 {'target':worker1.translate,'args':(),'kwargs':{'port_in':dm[1],'port_out':mx[1],'state':state } } ]
 
@@ -55,13 +60,13 @@ if __name__ == "__main__":
 
    poller = zmq.Poller()
 
-   context_state = zmq.Context()
-   socket_state = context_state.socket(zmq.PAIR)
+   context = zmq.Context()
+
+   socket_state = context.socket(zmq.PAIR)
    socket_state.bind("tcp://*:{}".format(msg_que.state))
    poller.register(socket_state, zmq.POLLIN)
 
-   context_logger = zmq.Context()
-   socket_logger = context_state.socket(zmq.PAIR)
+   socket_logger = context.socket(zmq.PAIR)
    socket_logger.bind("tcp://*:{}".format(msg_que.logger))
    poller.register(socket_logger, zmq.POLLIN)
 
@@ -70,17 +75,14 @@ if __name__ == "__main__":
    # --- Start Polling Loop ----
    while True:
 
-      rdy = dict(poller.poll(1000))
+      rdy = dict(poller.poll(2000))
 
       for sock,event in rdy.items():
          msg = sock.recv()
-         print("msg received",msg)
+         print(msg.decode())
 
-      
-      print(state['time'],"\n")
-       
-      print(json.dumps(dict(state)))
       jid.write(json.dumps(dict(state)))
+
       jid.flush()
       jid.seek(0)
 

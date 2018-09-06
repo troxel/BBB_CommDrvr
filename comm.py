@@ -10,7 +10,9 @@ import serial
 import select
 import struct
 
+import zmq
 import msg_que
+import zlog
 
 class Comm:
 
@@ -18,15 +20,17 @@ class Comm:
 
       # Serial file handles are preserved across fork
       self.serial_fspec = ['/dev/ttyO1','/dev/ttyO4']
-      self.serial_fspec = ['/dev/ttyUSB2']
+
+      self.serial_fspec = ['/dev/ttyUSB2'] # <--- testing for now
+
       self.serial = [None]*len(self.serial_fspec)
       self.fds2ser = {}   # file descriptor to serial device
-      self.fds2dtm = {}   # file descriptor to serial port number datum 
+      self.fds2dtm = {}   # file descriptor to serial port number datum
 
       for inx,fspec in enumerate(self.serial_fspec):
          try:
             ### timeout parameter will have to be tuned to hardware...
-            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.23 )
+            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.25 )  # <--- Tuned to h/w
          except Exception as err:
             print("Open error ",inx,self.serial_fspec[inx],err.args)
             sys.exit(0)
@@ -42,7 +46,7 @@ class Comm:
    # Receives incoming muxed data from serial ports
    # and demuxes and distributes to the appropiate msg queue
    # ---------------------------
-   def incoming(self):
+   def incoming(self,state):
 
       client_ports = msg_que.demux_lst
 
@@ -53,7 +57,6 @@ class Comm:
       for inx,port in enumerate(client_ports):
          self.client_socks[inx] = context.socket(zmq.PAIR)
          self.client_socks[inx].connect("tcp://localhost:{}".format(client_ports[inx]))
-         print("Created zmq at port {} inx={}".format(client_ports[inx],inx) )
 
       # Register serial port with poller
       poller = select.poll()
@@ -63,13 +66,12 @@ class Comm:
       # --- Start Polling Loop ----
       while True:
 
-
          rdy_lst = poller.poll()
          # returns a list of truples - (fd,event).
          for rdy in rdy_lst:
 
             # File descriptor
-            fd = rdy[0]  
+            fd = rdy[0]
             ser_obj = self.fds2ser[fd]
             datum = self.fds2dtm[fd]
 
@@ -83,7 +85,7 @@ class Comm:
    # Receives outgoing date from msg queue and muxes the data
    # and sends out the serial port.
    # ---------------------------
-   def outgoing(self):
+   def outgoing(self,state):
 
       server_ports = msg_que.mux_lst
 
