@@ -12,7 +12,6 @@ import struct
 
 import zmq
 import msg_que
-import zlog
 
 class Comm:
 
@@ -23,22 +22,22 @@ class Comm:
 
       self.serial_fspec = ['/dev/ttyUSB2'] # <--- testing for now
 
-      self.serial = [None]*len(self.serial_fspec)
-      self.fds2ser = {}   # file descriptor to serial device
-      self.fds2dtm = {}   # file descriptor to serial port number datum
+      self.serial = [None]*2
+      self.serfd2serobj = {}   # file descriptor to serial device
+      self.serfd2datum = {}   # file descriptor to serial port number datum
 
       for inx,fspec in enumerate(self.serial_fspec):
          try:
             ### timeout parameter will have to be tuned to hardware...
-            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.25 )  # <--- Tuned to h/w
+            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.3 )  # <--- Tuned to h/w
          except Exception as err:
-            print("Open error ",inx,self.serial_fspec[inx],err.args)
+            print("Serial Port Open Error ",inx,self.serial_fspec[inx],err.args)
             sys.exit(0)
 
          # links file desc with serial object
          fileno = self.serial[inx].fileno()
-         self.fds2ser[fileno] = self.serial[inx]
-         self.fds2dtm[fileno] = inx * 4
+         self.serfd2serobj[fileno] = self.serial[inx]
+         self.serfd2datum[fileno] = inx * 4
 
       print("Opened {}".format(self.serial_fspec[inx]))
 
@@ -72,11 +71,12 @@ class Comm:
 
             # File descriptor
             fd = rdy[0]
-            ser_obj = self.fds2ser[fd]
-            datum = self.fds2dtm[fd]
+            ser_obj = self.serfd2serobj[fd]
+            datum = self.serfd2datum[fd]
 
             msg_buffers = self._read_serial(ser_obj)
 
+            # Four buffers per serial port use inx to select ports 0 - 7
             for inx,msg in enumerate(msg_buffers):
                if msg:
                   self.client_socks[inx+datum].send( msg )
@@ -94,10 +94,21 @@ class Comm:
       self.server_socks = [None]*len(server_ports)
       context = zmq.Context()
 
+      prefixes = (0xFC,0xFD,0xFE,0xFF)
+
+      zfd2prefix = {}
+      zfd2serobj = {}
+
       for inx,port in enumerate(server_ports):
          self.server_socks[inx] = context.socket(zmq.PAIR)
-         print("Binding zmq at port {} inx={}".format(server_ports[inx],inx) )
          self.server_socks[inx].bind("tcp://*:{}".format(server_ports[inx]))
+         print("Binding zmq at port {} inx={} fileno={}".format(server_ports[inx],inx,self.server_socks[inx].fileno()), file=sys.stderr )
+
+         # Map zmq file descriptor to mux prefix and index to serial object
+         # Used upon return of poll()
+         zfd = self.server_socks[inx].fileno()
+         zfd2prefix[zfd] = prefixes[inx%4]
+         zfd2serobj[zfd] = self.serial[int(inx/4)]
 
       poller = zmq.Poller()
       for inx,sock in enumerate(self.server_socks):
@@ -105,18 +116,26 @@ class Comm:
 
       # --- Start Polling Loop ----
       while True:
+
+         # returns list of truples of sock obj and event
          rdy = dict(poller.poll())
          for sock,event in rdy.items():
             msg = sock.recv()
-            #time.sleep(2)
-            #smsg = ['Y','Y']
-            #for m in smsg:
-            #   b_out = struct.pack('Bc',0xFc,m.encode())
-            #   self.serial[0].write(b_out)
-            print("\nGot !!!!",msg)
 
-         ##pprint(rdy)
+            msg_out = bytearray()
 
+            zfd = sock.fileno()
+            prefix = zfd2prefix[zfd]
+            serobj = zfd2serobj[zfd]
+
+            for byte in msg:
+               msg_out.append(prefix)
+               msg_out.append(byte)
+
+            ##serobj.write(msg_out)
+            print("sending out serial port fd {}".format(serobj.fileno()))
+            print(msg_out)
+            print(msg)
 
    # ---------------------------
    def _read_serial(self,ser_obj):
@@ -130,7 +149,8 @@ class Comm:
             return(msg_buffers)
 
          if len(bytes_in) != 2:
-            print("Opps increase timeout only read {} byte".format(len(bytes_in)) )
+            print("Increase read timeout read {} byte(s)".format(len(bytes_in)) )
+            print("{}".format(bytes_in.decode('ASCII')) )
             time.sleep(1)
             ser_obj.read(1)
             continue
@@ -149,3 +169,4 @@ class Comm:
             byte = ser_obj.read(1)
 
          ##print("len ->",len(bytes_in),bytes_in)
+      return(msg_buffers)
