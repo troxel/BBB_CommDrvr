@@ -29,7 +29,7 @@ class Comm:
       for inx,fspec in enumerate(self.serial_fspec):
          try:
             ### timeout parameter will have to be tuned to hardware...
-            self.serial[inx] = serial.Serial(self.serial_fspec[inx],timeout=.3 )  # <--- Tuned to h/w
+            self.serial[inx] = serial.Serial(self.serial_fspec[inx],11520,timeout=.05 )  # <--- Might have to tune to h/w
          except Exception as err:
             print("Serial Port Open Error ",inx,self.serial_fspec[inx],err.args)
             sys.exit(0)
@@ -98,6 +98,7 @@ class Comm:
 
       zfd2prefix = {}
       zfd2serobj = {}
+      zfd2com    = {}
 
       for inx,port in enumerate(server_ports):
          self.server_socks[inx] = context.socket(zmq.PAIR)
@@ -109,6 +110,7 @@ class Comm:
          zfd = self.server_socks[inx].fileno()
          zfd2prefix[zfd] = prefixes[inx%4]
          zfd2serobj[zfd] = self.serial[int(inx/4)]
+         zfd2com[zfd]    = msg_que.com_lst[inx]        # for info/debug purposes
 
       poller = zmq.Poller()
       for inx,sock in enumerate(self.server_socks):
@@ -133,7 +135,7 @@ class Comm:
                msg_out.append(byte)
 
             ##serobj.write(msg_out)
-            print("sending out serial port fd {}".format(serobj.fileno()))
+            print("sending out serial port {}".format(zfd2com[zfd]) )
             print(msg_out)
             print(msg)
 
@@ -150,9 +152,9 @@ class Comm:
 
          if len(bytes_in) != 2:
             print("Increase read timeout read {} byte(s)".format(len(bytes_in)) )
-            print("{}".format(bytes_in.decode('ASCII')) )
-            time.sleep(1)
-            ser_obj.read(1)
+            print("{}".format(bytes_in) )
+            #time.sleep(.2)
+            #ser_obj.read(1)
             continue
 
          if bytes_in[0] == 0xFC:

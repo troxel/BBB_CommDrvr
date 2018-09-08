@@ -13,18 +13,29 @@ def translate(port_in,port_out,state):
 
    context = zmq.Context()
 
-   socket_log = context.socket(zmq.PAIR)
-   socket_log.connect("tcp://localhost:{}".format(msg_que.logger))
+   sock_log = context.socket(zmq.PAIR)
+   sock_log.connect("tcp://localhost:{}".format(msg_que.logger))
 
-   socket_in = context.socket(zmq.PAIR)
-   socket_in.bind("tcp://*:{}".format(port_in))
+   # Receiving
+   sock_in = context.socket(zmq.PAIR)
+   sock_in.bind("tcp://*:{}".format(port_in))
 
-   socket_out = context.socket(zmq.PAIR)
-   socket_out.connect("tcp://localhost:{}".format(port_out))
+   # Self same comm port as receiving
+   sock_same = context.socket(zmq.PAIR)
+   sock_same.connect("tcp://localhost:{}".format(port_in+100))
+
+   # Destination port
+   sock_out = context.socket(zmq.PAIR)
+   sock_out.connect("tcp://localhost:{}".format(port_out))
 
    while(1):
-       message = socket_in.recv()
-       print("Worker {} got message {}".format(port_in,message))
-       socket_out.send(message)
+       message = sock_in.recv()
+       ##print("Worker {} got message {}".format(port_in,message))
+
+       # Ack or respond to receiving port
+       sock_same.send(b'Ack')
+
+       # Send to Destination
+       sock_out.send(message)
 
        state['time'] = time.time()
